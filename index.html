@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Трекер сна 1/4</title>
+    <link rel="manifest" href="manifest.json">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #0b0e14; color: #e0e0e0;
+            display: flex; justify-content: center; align-items: center;
+            min-height: 100vh; padding: 20px;
+        }
+        .app { max-width: 360px; width: 100%; text-align: center; }
+        h1 { font-size: 1.8rem; margin-bottom: 0.2em; color: #f0c060; }
+        .state { font-size: 1.2rem; margin: 0.5em 0 1em; opacity: 0.9; }
+        .stats { background: #1a1d24; border-radius: 16px; padding: 16px; margin-bottom: 20px; }
+        .stats p { margin: 0.3em 0; font-size: 1rem; }
+        .suggestion {
+            background: #22262e; border-radius: 16px; padding: 16px; margin-bottom: 24px;
+            border: 1px solid #f0c06040; font-size: 1.1rem; line-height: 1.5;
+        }
+        .btn {
+            width: 100%; padding: 22px 0; font-size: 1.4rem; font-weight: bold;
+            border: none; border-radius: 100px; background: #f0c060; color: #0b0e14;
+            cursor: pointer; transition: 0.2s; box-shadow: 0 4px 20px rgba(240,192,96,0.3);
+        }
+        .btn:active { background: #e0b050; transform: scale(0.98); }
+        .reset-btn {
+            margin-top: 20px; background: none; border: 1px solid #555;
+            color: #aaa; padding: 10px 20px; border-radius: 30px; font-size: 0.9rem; cursor: pointer;
+        }
+        .reset-btn:active { background: #ffffff15; }
+    </style>
+</head>
+<body>
+<div class="app">
+    <h1>🌗 Сон 1/4</h1>
+    <div class="state" id="stateText">Загрузка...</div>
+    <div class="stats" id="stats">
+        <p>💤 Сон: <span id="sleepVal">0ч 0м</span></p>
+        <p>☀️ Бодрствование: <span id="wakeVal">0ч 0м</span></p>
+    </div>
+    <div class="suggestion" id="suggestion">Загрузка...</div>
+    <button class="btn" id="mainBtn">Я ложусь спать</button>
+    <button class="reset-btn" id="resetBtn">Сбросить всё</button>
+</div>
+
+<script>
+    // ========== РЕГИСТРАЦИЯ SERVICE WORKER ==========
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js')
+            .then(reg => console.log('SW зарегистрирован', reg))
+            .catch(err => console.log('Ошибка SW', err));
+    }
+
+    // ---------- логика сна ----------
+    let sleepTotal = 0, wakeTotal = 0, state = 'awake';
+    let awakeStart = null, sleepStart = null, targetAlarm = null;
+    const STORAGE_KEY = 'sleep14_data';
+
+    function msToHM(ms) {
+        if (ms < 0) ms = 0;
+        const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
+        return `${h}ч ${m}м`;
+    }
+
+    function formatTime(ts) {
+        return new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function save() {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+            sleepTotal, wakeTotal, state, awakeStart, sleepStart, targetAlarm
+        }));
+    }
+
+    function load() {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return false;
+        try {
+            const d = JSON.parse(raw);
+            sleepTotal = d.sleepTotal ?? 0;
+            wakeTotal = d.wakeTotal ?? 0;
+            state = d.state ?? 'awake';
+            awakeStart = d.awakeStart ?? null;
+            sleepStart = d.sleepStart ?? null;
+            targetAlarm = d.targetAlarm ?? null;
+            return true;
+        } catch(e) { return false; }
+    }
+
+    function updateUI() {
+        const now = Date.now();
+        document.getElementById('stateText').textContent =
+            state === 'awake' ? '☀️ Вы бодрствуете' : '💤 Вы спите';
+        const btn = document.getElementById('mainBtn');
+        btn.textContent = state === 'awake' ? '😴 Я ложусь спать' : '☀️ Я проснулся';
+        document.getElementById('sleepVal').textContent = msToHM(sleepTotal);
+        document.getElementById('wakeVal').textContent = msToHM(wakeTotal);
+
+        let suggestion = '';
+        if (state === 'awake') {
+            let totalWake = wakeTotal + (awakeStart ? Math.max(0, now - awakeStart) : 0);
+            if (totalWake === 0) {
+                suggestion = '⏳ Недостаточно данных.<br>Нажмите кнопку, когда ляжете спать.';
+            } else {
+                const D = (totalWake / 3) - sleepTotal;
+                if (D <= 0) {
+                    suggestion = '✅ Цель уже достигнута!<br>Можете не спать или поспать немного.';
+                } else {
+                    const alarmTime = new Date(now + D);
+                    suggestion = `⏰ Если лечь <b>сейчас</b>, поставьте будильник на<br><b>${formatTime(alarmTime)}</b> (через ${msToHM(D)})`;
+                }
+            }
+        } else { // asleep
+            if (targetAlarm && targetAlarm > now) {
+                suggestion = `⏰ Будильник на <b>${formatTime(targetAlarm)}</b><br>(осталось примерно ${msToHM(targetAlarm - now)})`;
+            } else if (targetAlarm && targetAlarm <= now) {
+                suggestion = '⏰ Время будильника прошло! Пора просыпаться.';
+            } else {
+                suggestion = '💤 Будильник не требуется.<br>Спите столько, сколько хочется.';
+            }
+        }
+        document.getElementById('suggestion').innerHTML = suggestion;
+    }
+
+    function onMainButton() {
+        const now = Date.now();
+        if (state === 'awake') {
+            if (awakeStart) wakeTotal += Math.max(0, now - awakeStart);
+            state = 'asleep'; sleepStart = now; awakeStart = null;
+            const D = (wakeTotal / 3) - sleepTotal;
+            targetAlarm = (D > 0) ? now + D : null;
+        } else {
+            if (sleepStart) sleepTotal += Math.max(0, now - sleepStart);
+            state = 'awake'; awakeStart = now; sleepStart = null; targetAlarm = null;
+        }
+        save(); updateUI();
+    }
+
+    function resetAll() {
+        if (confirm('Точно сбросить все накопленные данные?')) {
+            sleepTotal = wakeTotal = 0; state = 'awake';
+            awakeStart = sleepStart = targetAlarm = null;
+            save(); updateUI();
+        }
+    }
+
+    if (!load()) { state = 'awake'; save(); }
+    if (state === 'awake' && awakeStart === null) { /* ок */ }
+
+    document.getElementById('mainBtn').addEventListener('click', onMainButton);
+    document.getElementById('resetBtn').addEventListener('click', resetAll);
+    updateUI();
+    setInterval(updateUI, 10000);
+</script>
+</body>
+</html>
