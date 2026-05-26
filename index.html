@@ -107,7 +107,7 @@
             if (totalWake === 0) {
                 suggestion = '⏳ Недостаточно данных.<br>Нажмите кнопку, когда ляжете спать.';
             } else {
-                const D = (totalWake / 3) - sleepTotal;
+                const D = (totalWake * 7 / 17) - sleepTotal;
                 if (D <= 0) {
                     suggestion = '✅ Цель уже достигнута!<br>Можете не спать или поспать немного.';
                 } else {
@@ -132,7 +132,7 @@
         if (state === 'awake') {
             if (awakeStart) wakeTotal += Math.max(0, now - awakeStart);
             state = 'asleep'; sleepStart = now; awakeStart = null;
-            const D = (wakeTotal / 3) - sleepTotal;
+            const D = (wakeTotal * 7 / 17) - sleepTotal;
             targetAlarm = (D > 0) ? now + D : null;
         } else {
             if (sleepStart) sleepTotal += Math.max(0, now - sleepStart);
